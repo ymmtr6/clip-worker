@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "clip-worker",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "routes": [
+    { "pattern": "clip.riyamamo.com", "custom_domain": true }
+  ],
+  "workers_dev": false,
+  // /api/* だけ Worker が処理し、それ以外は public/ をそのまま返す
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "movie-clip",
+      // database_id は初回デプロイ時に自動プロビジョニングされる
+      "migrations_dir": "./migrations"
+    }
+  ],
+  // 視聴（/ と /api/*）は Cloudflare Access で守り、ボット用の /api/v1/* だけ Bypass にする。
+  // Worker 側でも Access の JWT を検証する。ACCESS_AUD が空なら視聴APIは 503 を返す。
+  // ローカルでは .dev.vars に DEV_VIEWER_EMAIL=... と ACCESS_AUD= （空）を書くと素通しになる。
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "riyamamo.cloudflareaccess.com",
+    "ACCESS_AUD": "",
+    "S3_ENDPOINT": "s3.ap-northeast-1.wasabisys.com",
+    "S3_BUCKET": "movie-clip",
+    "S3_REGION": "ap-northeast-1"
+  },
+  // secrets: WASABI_ACCESS_KEY / WASABI_SECRET_KEY
+  // 完了されずに残ったアップロード枠を毎日片付ける
+  "triggers": { "crons": ["0 19 * * *"] },
+  "observability": { "enabled": true }
+}

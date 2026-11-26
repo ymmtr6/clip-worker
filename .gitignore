@@ -1,0 +1,15 @@
+node_modules/
+.wrangler/
+.dev.vars
+.DS_Store
+# iOS
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+# Android
+.gradle/
+local.properties
+android/app/build/
+android/build/
+*.apk
