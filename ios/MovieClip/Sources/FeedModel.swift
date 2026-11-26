@@ -23,9 +23,10 @@ final class FeedModel {
         self.auth = auth
     }
 
-    private var api: API? {
-        auth.token.map { API(token: $0) }
-    }
+    private var api: API { API(token: auth.token) }
+
+    /// 削除は Access を通った人だけ
+    var canDelete: Bool { auth.isSignedIn }
 
     func reload(tag: String? = nil) async {
         self.tag = tag
@@ -41,7 +42,7 @@ final class FeedModel {
     }
 
     func loadMore() async {
-        guard !loading, !done, let api else { return }
+        guard !loading, !done else { return }
         loading = true
         defer { loading = false; loadedOnce = true }
         do {
@@ -60,7 +61,7 @@ final class FeedModel {
     func refresh(id: String) async {
         if let last = refreshedAt[id], Date().timeIntervalSince(last) < 10 { return }
         refreshedAt[id] = Date()
-        guard let api, let index = clips.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = clips.firstIndex(where: { $0.id == id }) else { return }
         do {
             clips[index] = try await api.clip(id: id)
         } catch {
@@ -69,12 +70,11 @@ final class FeedModel {
     }
 
     func recordView(id: String) {
-        guard let api else { return }
+        let api = api
         Task { try? await api.recordView(id: id) }
     }
 
     func delete(id: String) async {
-        guard let api else { return }
         do {
             try await api.delete(id: id)
             clips.removeAll { $0.id == id }
@@ -85,7 +85,7 @@ final class FeedModel {
 
     private func handle(_ error: Error) {
         if case APIError.unauthorized = error {
-            auth.signOut()
+            auth.requireLogin()
         } else if (error as? URLError)?.code != .cancelled {
             errorMessage = "読み込めませんでした"
         }

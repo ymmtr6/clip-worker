@@ -26,6 +26,8 @@ enum Server {
 final class AuthStore: NSObject, ASWebAuthenticationPresentationContextProviding {
     private(set) var token: String?
     private(set) var signingIn = false
+    /// 視聴 API が認証を求めたとき（401 や Access へのリダイレクト）。公開モードのあいだはログインなしで見られる
+    private(set) var needsLogin = false
     var lastError: String?
 
     private var session: ASWebAuthenticationSession?
@@ -73,6 +75,7 @@ final class AuthStore: NSObject, ASWebAuthenticationPresentationContextProviding
             guard let value, !value.isEmpty else { throw URLError(.userAuthenticationRequired) }
             Keychain.save(value)
             token = value
+            needsLogin = false
             lastError = nil
         } catch {
             session = nil
@@ -82,10 +85,11 @@ final class AuthStore: NSObject, ASWebAuthenticationPresentationContextProviding
         }
     }
 
-    /// 期限切れや 401 のとき。次の操作でログインからやり直す
-    func signOut() {
+    /// 期限切れや 401 のとき。ログイン画面に戻す
+    func requireLogin() {
         Keychain.delete()
         token = nil
+        needsLogin = true
     }
 
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {

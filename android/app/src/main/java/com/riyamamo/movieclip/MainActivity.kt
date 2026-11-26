@@ -88,10 +88,10 @@ class MainActivity : ComponentActivity() {
         handleAuthCallback(intent)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = Accent)) {
-                if (model.signedIn) {
-                    FeedScreen(model)
-                } else {
+                if (model.needsLogin) {
                     LoginScreen(onLogin = ::startLogin)
+                } else {
+                    FeedScreen(model)
                 }
             }
         }
@@ -183,7 +183,7 @@ private fun FeedScreen(model: FeedViewModel) {
                     pool.releaseAll()
                     model.reload(tag)
                 },
-                onDelete = { model.delete(clip.id) },
+                onDelete = if (model.canDelete) ({ model.delete(clip.id) }) else null,
             )
         }
 
@@ -252,7 +252,7 @@ private fun RoundIconButton(onClick: () -> Unit, content: @Composable () -> Unit
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-private fun ClipPage(clip: Clip, pool: PlayerPool, isActive: Boolean, onTag: (String) -> Unit, onDelete: () -> Unit) {
+private fun ClipPage(clip: Clip, pool: PlayerPool, isActive: Boolean, onTag: (String) -> Unit, onDelete: (() -> Unit)?) {
     val context = LocalContext.current
     var confirmingDelete by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -343,8 +343,10 @@ private fun ClipPage(clip: Clip, pool: PlayerPool, isActive: Boolean, onTag: (St
                     }
                 }
                 Spacer(Modifier.width(12.dp))
-                RoundIconButton(onClick = { confirmingDelete = true }) {
-                    Icon(Icons.Default.Delete, contentDescription = "削除", tint = Color.White)
+                if (onDelete != null) {
+                    RoundIconButton(onClick = { confirmingDelete = true }) {
+                        Icon(Icons.Default.Delete, contentDescription = "削除", tint = Color.White)
+                    }
                 }
             }
             Box(Modifier.fillMaxWidth().height(2.dp).background(Color.White.copy(alpha = 0.15f))) {
@@ -359,7 +361,7 @@ private fun ClipPage(clip: Clip, pool: PlayerPool, isActive: Boolean, onTag: (St
             onDismissRequest = { confirmingDelete = false },
             title = { Text("「${clip.title}」を削除しますか？") },
             confirmButton = {
-                TextButton(onClick = { confirmingDelete = false; onDelete() }) { Text("削除", color = Accent) }
+                TextButton(onClick = { confirmingDelete = false; onDelete?.invoke() }) { Text("削除", color = Accent) }
             },
             dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text("キャンセル") } },
         )

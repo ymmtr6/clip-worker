@@ -13,7 +13,11 @@ import kotlinx.coroutines.launch
 class FeedViewModel(application: Application) : AndroidViewModel(application) {
     private val tokens = TokenStore(application)
 
-    var signedIn by mutableStateOf(tokens.token != null)
+    /** 視聴 API が認証を求めたとき（401 や Access へのリダイレクト）。公開モードのあいだはログインなしで見られる */
+    var needsLogin by mutableStateOf(false)
+        private set
+    /** 削除は Access を通った人だけ */
+    var canDelete by mutableStateOf(tokens.token != null)
         private set
     val clips = mutableStateListOf<Clip>()
     var loading by mutableStateOf(false)
@@ -33,11 +37,12 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
     /** 残りがこの本数になったら次のページを読む */
     private val prefetchRemaining = 3
 
-    private val api: Api? get() = tokens.token?.let { Api(it) }
+    private val api: Api get() = Api(tokens.token)
 
     fun onSignedIn(token: String) {
         tokens.token = token
-        signedIn = true
+        canDelete = true
+        needsLogin = false
         reload(null)
     }
 
@@ -55,7 +60,7 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun loadMore() {
-        val api = api ?: return
+        val api = api
         if (loading || done) return
         loading = true
         viewModelScope.launch {
@@ -80,7 +85,7 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
         val now = System.currentTimeMillis()
         if (now - (refreshedAt[id] ?: 0) < 10_000) return
         refreshedAt[id] = now
-        val api = api ?: return
+        val api = api
         viewModelScope.launch {
             try {
                 val fresh = api.clip(id)
@@ -93,12 +98,12 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun recordView(id: String) {
-        val api = api ?: return
+        val api = api
         viewModelScope.launch { runCatching { api.recordView(id) } }
     }
 
     fun delete(id: String) {
-        val api = api ?: return
+        val api = api
         viewModelScope.launch {
             try {
                 api.delete(id)
@@ -114,7 +119,8 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
             is CancellationException -> throw e
             is UnauthorizedException -> {
                 tokens.token = null
-                signedIn = false
+                canDelete = false
+                needsLogin = true
             }
             else -> errorMessage = "読み込めませんでした"
         }

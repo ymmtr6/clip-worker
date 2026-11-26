@@ -16,6 +16,8 @@ const state = {
   active: -1,
   muted: localStorage.getItem("clip:muted") !== "0",
   viewed: new Set(),
+  // 公開モードでは /api/me が通らないので削除ボタンを出さない
+  canDelete: false,
 };
 
 /** 再生として数えるまでの秒数 */
@@ -111,7 +113,9 @@ function buildSlide(clip) {
     } catch {}
   });
 
-  node.querySelector(".delete").addEventListener("click", async () => {
+  const deleteButton = node.querySelector(".delete");
+  deleteButton.hidden = !state.canDelete;
+  deleteButton.addEventListener("click", async () => {
     if (!confirm(`「${clip.title}」を削除しますか？`)) return;
     await api(`/api/clips/${encodeURIComponent(clip.id)}`, { method: "DELETE" });
     video.removeAttribute("src");
@@ -225,4 +229,8 @@ if (tag) {
 }
 
 renderMute();
+fetch("/api/me", { credentials: "same-origin" }).then((response) => {
+  state.canDelete = response.ok;
+  for (const slide of state.slides) slide.node.querySelector(".delete").hidden = !state.canDelete;
+}).catch(() => {});
 loadMore();

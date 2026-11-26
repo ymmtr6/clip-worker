@@ -74,8 +74,8 @@ class TokenStore(context: Context) {
     }
 }
 
-/** 視聴 API。認証は Access の JWT を cf-access-token ヘッダで送る */
-class Api(private val token: String) {
+/** 視聴 API。ログイン済みなら Access の JWT を cf-access-token ヘッダで送る */
+class Api(private val token: String?) {
 
     suspend fun feed(cursor: String?, tag: String?): FeedPage {
         val query = buildList {
@@ -105,7 +105,7 @@ class Api(private val token: String) {
         val connection = URL(Server.origin + path).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = method
-            connection.setRequestProperty("cf-access-token", token)
+            token?.let { connection.setRequestProperty("cf-access-token", it) }
             connection.connectTimeout = 15_000
             connection.readTimeout = 30_000
             val status = connection.responseCode

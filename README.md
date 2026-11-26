@@ -36,7 +36,8 @@ npm run typecheck
    npx wrangler secret put WASABI_SECRET_KEY
    ```
 
-2. Cloudflare Zero Trust で Access アプリケーションを2つ作る
+2. （閲覧を閉じるとき）Cloudflare Zero Trust で Access アプリケーションを2つ作り、`wrangler.jsonc` の `PUBLIC_VIEWER` を外す。
+   今は `PUBLIC_VIEWER=true` で閲覧だけ公開している。`node scripts/setup-access.mjs <メール>` でも作れる（Access の編集権限があるトークンが必要）
    - `clip.riyamamo.com`（パス指定なし）: Allow 自分のメールアドレス。AUD タグを `wrangler.jsonc` の `ACCESS_AUD` に入れる
    - `clip.riyamamo.com/api/v1`: Bypass Everyone（ボットはトークンで認証する）
 

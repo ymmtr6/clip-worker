@@ -81,6 +81,10 @@ clips/<id>/poster
 | `/api/v1/openapi.json` | ボット | 認証なし（ツール定義） |
 
 - スコープ: `read` / `clips:write` / `clips:delete`
+- **公開モード（`PUBLIC_VIEWER=true`、今の本番）**: 閲覧系（`GET /api/feed`・`/api/tags`・`/api/clips/:id`・`POST /api/clips/:id/view`）だけ認証なしで開く。
+  削除・トークン管理・`/api/me`・`/api/app-auth` は Access 必須のまま（`ACCESS_AUD` が空なので 503）。
+  クライアントはログインなしでフィードを出し、401 が返ったときだけログイン画面に回る。削除ボタンはログイン済み（Web は `/api/me` が通る）ときだけ出す。
+  閉じるときは Access を設定（`scripts/setup-access.mjs`）して `PUBLIC_VIEWER` を外す
 - Access の設定ミスで素通しになっても Worker が JWT を検証するので視聴 API は開かない。
   `ACCESS_AUD` が空なら 503（ローカルは `DEV_VIEWER_EMAIL` で素通し）
 - ネイティブアプリは `/api/app-auth` を ASWebAuthenticationSession / Custom Tabs で開いて Access → Google を通し、

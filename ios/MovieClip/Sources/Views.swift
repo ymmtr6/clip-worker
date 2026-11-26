@@ -13,10 +13,10 @@ struct MovieClipApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if auth.isSignedIn {
-                    FeedView(auth: auth)
-                } else {
+                if auth.needsLogin {
                     LoginView(auth: auth)
+                } else {
+                    FeedView(auth: auth)
                 }
             }
             .preferredColorScheme(.dark)
@@ -70,7 +70,7 @@ struct FeedView: View {
                         isActive: pool.activeID == clip.id,
                         pool: pool,
                         onTag: { tag in Task { await reload(tag: tag) } },
-                        onDelete: { Task { await model.delete(id: clip.id) } }
+                        onDelete: model.canDelete ? { Task { await model.delete(id: clip.id) } } : nil
                     )
                     .containerRelativeFrame([.horizontal, .vertical])
                     .id(clip.id)
@@ -166,7 +166,7 @@ struct ClipPage: View {
     let isActive: Bool
     let pool: PlayerPool
     let onTag: (String) -> Void
-    let onDelete: () -> Void
+    let onDelete: (() -> Void)?
 
     @State private var confirmingDelete = false
     @Environment(\.openURL) private var openURL
@@ -196,7 +196,7 @@ struct ClipPage: View {
         .overlay(alignment: .bottom) { meta }
         .clipped()
         .confirmationDialog("「\(clip.title)」を削除しますか？", isPresented: $confirmingDelete, titleVisibility: .visible) {
-            Button("削除", role: .destructive, action: onDelete)
+            Button("削除", role: .destructive) { onDelete?() }
         }
     }
 
@@ -238,12 +238,14 @@ struct ClipPage: View {
                     }
                 }
                 Spacer(minLength: 0)
-                Button {
-                    confirmingDelete = true
-                } label: {
-                    Image(systemName: "trash")
-                        .frame(width: 44, height: 44)
-                        .background(.black.opacity(0.35), in: Circle())
+                if onDelete != nil {
+                    Button {
+                        confirmingDelete = true
+                    } label: {
+                        Image(systemName: "trash")
+                            .frame(width: 44, height: 44)
+                            .background(.black.opacity(0.35), in: Circle())
+                    }
                 }
             }
             .padding(.horizontal, 16)

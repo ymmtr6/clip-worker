@@ -49,9 +49,9 @@ enum APIError: Error {
     case http(Int)
 }
 
-/// 視聴 API。認証は Access の JWT を `cf-access-token` ヘッダで送る
+/// 視聴 API。ログイン済みなら Access の JWT を `cf-access-token` ヘッダで送る
 struct API {
-    let token: String
+    let token: String?
 
     private static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
@@ -95,7 +95,7 @@ struct API {
 
     private func data(for request: URLRequest) async throws -> Data {
         var request = request
-        request.setValue(token, forHTTPHeaderField: "cf-access-token")
+        if let token { request.setValue(token, forHTTPHeaderField: "cf-access-token") }
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.http(0) }
         // Access のセッションが切れているとログイン画面へリダイレクトされる

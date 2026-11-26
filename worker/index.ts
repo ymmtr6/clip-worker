@@ -21,6 +21,8 @@ export type Env = WasabiEnv & {
   ACCESS_AUD?: string;
   /** ローカル開発用（.dev.vars）。ACCESS_AUD が空のときに限り視聴APIを素通しにする */
   DEV_VIEWER_EMAIL?: string;
+  /** "true" ならフィードと再生（閲覧系）だけ認証なしで開く。削除とトークン管理は Access のまま */
+  PUBLIC_VIEWER?: string;
 };
 
 type Principal = {
@@ -524,6 +526,13 @@ const viewerAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
+/** 閲覧系。PUBLIC_VIEWER なら誰でも通し、そうでなければ viewerAuth と同じ */
+const readerAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
+  if (c.env.PUBLIC_VIEWER !== "true") return viewerAuth(c, next);
+  c.set("principal", { actor: "viewer:public", scopes: new Set(), jwt: "" });
+  await next();
+};
+
 type TokenRow = { id: string; name: string; token_hash: string; scopes: string; last_used_at: number | null; revoked_at: number | null };
 
 const agentAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
@@ -642,9 +651,12 @@ export function createApp(makeStorage: (env: Env) => Storage) {
 
   app.route("/api/v1", agent);
 
-  // --- 視聴者用（Web とアプリ）。Access を通った人だけ
+  // --- 視聴者用（Web とアプリ）。閲覧系は readerAuth、それ以外は Access を通った人だけ
   const viewer = new Hono<AppEnv>();
-  viewer.use("*", viewerAuth);
+  for (const [method, path] of [["GET", "/feed"], ["GET", "/tags"], ["GET", "/clips/:id"], ["POST", "/clips/:id/view"]] as const) {
+    viewer.on(method, path, readerAuth);
+  }
+  viewer.use("*", async (c, next) => (c.get("principal") ? next() : viewerAuth(c, next)));
 
   // アプリのログイン用。Google は WebView 内の OAuth を拒否するため、アプリは
   // ASWebAuthenticationSession / Custom Tabs でここを開いて Access を通り、JWT を受け取る

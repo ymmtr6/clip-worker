@@ -27,6 +27,8 @@
   "vars": {
     "ACCESS_TEAM_DOMAIN": "riyamamo.cloudflareaccess.com",
     "ACCESS_AUD": "",
+    // 閲覧系（フィード・再生）を認証なしで開く。Access を設定して閉じるときは外す
+    "PUBLIC_VIEWER": "true",
     "S3_ENDPOINT": "s3.ap-northeast-1.wasabisys.com",
     "S3_BUCKET": "movie-clip",
     "S3_REGION": "ap-northeast-1"

@@ -160,6 +160,29 @@ describe("認証とスコープ", () => {
     env = { DB: env.DB } as Env;
     expect((await call("/api/feed")).status).toBe(503);
   });
+
+  it("PUBLIC_VIEWER なら閲覧だけ開き、削除とトークン管理は閉じたまま", async () => {
+    const token = await issue();
+    const { body } = await uploadClip(token);
+    storage.putObject(`clips/${body.clip.id}/video`, 10, "video/mp4");
+    await call(`/api/v1/clips/${body.clip.id}/complete`, { method: "POST", token });
+
+    env = { DB: env.DB, PUBLIC_VIEWER: "true" } as Env;
+    const feed = await call("/api/feed");
+    expect(feed.status).toBe(200);
+    expect(((await feed.json()) as { clips: unknown[] }).clips).toHaveLength(1);
+    expect((await call("/api/tags")).status).toBe(200);
+    expect((await call(`/api/clips/${body.clip.id}`)).status).toBe(200);
+    expect((await call(`/api/clips/${body.clip.id}/view`, { method: "POST" })).status).toBe(200);
+
+    expect((await call(`/api/clips/${body.clip.id}`, { method: "DELETE" })).status).toBe(503);
+    expect((await call("/api/admin/tokens")).status).toBe(503);
+    expect((await call("/api/admin/tokens", { method: "POST", json: { name: "x" } })).status).toBe(503);
+    expect((await call("/api/app-auth")).status).toBe(503);
+    expect((await call("/api/me")).status).toBe(503);
+    // ボット API は今までどおりトークン必須
+    expect((await call("/api/v1/clips")).status).toBe(401);
+  });
 });
 
 describe("視聴", () => {
