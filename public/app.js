@@ -4,6 +4,9 @@ const template = document.getElementById("slide-template");
 const muteButton = document.getElementById("mute");
 const tagChip = document.getElementById("tag-chip");
 const empty = document.getElementById("empty");
+const grid = document.getElementById("grid");
+const gridToggle = document.getElementById("grid-toggle");
+const orderButton = document.getElementById("order");
 
 const params = new URLSearchParams(location.search);
 const tag = params.get("tag");
@@ -18,6 +21,9 @@ const state = {
   viewed: new Set(),
   // 公開モードでは /api/me が通らないので削除ボタンを出さない
   canDelete: false,
+  generation: 0,
+  // 並び順（新着／シャッフル）はミュートと同じく端末に保存する
+  shuffled: localStorage.getItem("clip:order") === "shuffle",
 };
 
 /** 再生として数えるまでの秒数 */
@@ -121,9 +127,71 @@ function buildSlide(clip) {
     video.removeAttribute("src");
     video.load();
     node.remove();
+    slide.tile?.remove();
   });
 
+  slide.tile = buildTile(slide);
   return slide;
+}
+
+/** 一覧のサムネイル。ポスターが無ければ動画の先頭付近を見せる */
+function buildTile(slide) {
+  const { clip } = slide;
+  const tile = document.createElement("button");
+  tile.className = "tile";
+  if (clip.poster_url) {
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.src = clip.poster_url;
+    tile.append(img);
+  } else {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "metadata";
+    video.src = `${clip.video_url}#t=0.5`;
+    tile.append(video);
+  }
+  const caption = document.createElement("div");
+  caption.className = "caption";
+  caption.textContent = clip.title;
+  const views = document.createElement("span");
+  views.textContent = `▶ ${clip.view_count}`;
+  caption.append(views);
+  tile.append(caption);
+  tile.addEventListener("click", () => {
+    showGrid(false);
+    slide.node.scrollIntoView({ behavior: "instant" });
+    if (slide.index === state.active) slide.video.play().catch(() => {});
+  });
+  return tile;
+}
+
+function showGrid(visible) {
+  grid.hidden = !visible;
+  gridToggle.textContent = visible ? "✕" : "▦";
+  gridToggle.setAttribute("aria-label", visible ? "フィードに戻る" : "一覧");
+  if (visible) state.slides[state.active]?.video.pause();
+}
+
+function renderOrder() {
+  orderButton.textContent = state.shuffled ? "🔀" : "🕒";
+  orderButton.title = state.shuffled ? "シャッフル（クリックで新着順）" : "新着順（クリックでシャッフル）";
+}
+
+/** 並び順を変えたら最初から読み直す */
+function resetFeed() {
+  for (const slide of state.slides) {
+    observer.unobserve(slide.node);
+    slide.video.pause();
+    slide.video.removeAttribute("src");
+    slide.video.load();
+  }
+  feed.replaceChildren();
+  grid.replaceChildren();
+  Object.assign(state, { slides: [], cursor: null, done: false, loading: false, active: -1, generation: state.generation + 1 });
+  feed.scrollTop = 0;
+  loadMore();
 }
 
 /** 前後1本まで src を持たせ、それより遠いものは外してメモリと帯域を返す */
@@ -173,16 +241,21 @@ const observer = new IntersectionObserver((entries) => {
 async function loadMore() {
   if (state.loading || state.done) return;
   state.loading = true;
+  const generation = state.generation;
   try {
     const query = new URLSearchParams();
     if (state.cursor) query.set("cursor", state.cursor);
     if (tag) query.set("tag", tag);
+    if (state.shuffled) query.set("order", "shuffle");
     const page = await api(`/api/feed?${query}`);
+    // 読み込み中に並び順を変えたら、古い並びの結果は捨てる
+    if (generation !== state.generation) return;
     for (const clip of page.clips) {
       const slide = buildSlide(clip);
       slide.node.dataset.index = String(slide.index);
       state.slides.push(slide);
       feed.append(slide.node);
+      grid.append(slide.tile);
       observer.observe(slide.node);
     }
     state.cursor = page.next_cursor;
@@ -191,7 +264,7 @@ async function loadMore() {
   } catch (error) {
     console.error(error);
   } finally {
-    state.loading = false;
+    if (generation === state.generation) state.loading = false;
   }
 }
 
@@ -199,6 +272,20 @@ function scrollBy(delta) {
   const next = state.slides[state.active + delta];
   next?.node.scrollIntoView({ behavior: "smooth" });
 }
+
+gridToggle.addEventListener("click", () => showGrid(grid.hidden));
+
+orderButton.addEventListener("click", () => {
+  state.shuffled = !state.shuffled;
+  localStorage.setItem("clip:order", state.shuffled ? "shuffle" : "latest");
+  renderOrder();
+  resetFeed();
+});
+
+// 一覧の末尾近くまで来たら次のページを読む
+grid.addEventListener("scroll", () => {
+  if (grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 400) loadMore();
+});
 
 muteButton.addEventListener("click", () => {
   state.muted = !state.muted;
@@ -229,6 +316,8 @@ if (tag) {
 }
 
 renderMute();
+renderOrder();
+showGrid(false);
 fetch("/api/me", { credentials: "same-origin" }).then((response) => {
   state.canDelete = response.ok;
   for (const slide of state.slides) slide.node.querySelector(".delete").hidden = !state.canDelete;

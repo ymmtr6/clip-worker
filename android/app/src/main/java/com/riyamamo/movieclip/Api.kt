@@ -22,6 +22,7 @@ data class Clip(
     val height: Int?,
     val videoUrl: String,
     val posterUrl: String?,
+    val viewCount: Int,
 ) {
     val isLandscape: Boolean get() = width != null && height != null && width > height
 
@@ -77,10 +78,11 @@ class TokenStore(context: Context) {
 /** 視聴 API。ログイン済みなら Access の JWT を cf-access-token ヘッダで送る */
 class Api(private val token: String?) {
 
-    suspend fun feed(cursor: String?, tag: String?): FeedPage {
+    suspend fun feed(cursor: String?, tag: String?, shuffled: Boolean): FeedPage {
         val query = buildList {
             cursor?.let { add("cursor=${encode(it)}") }
             tag?.let { add("tag=${encode(it)}") }
+            if (shuffled) add("order=shuffle")
         }.joinToString("&")
         val json = JSONObject(request("GET", "api/feed" + if (query.isEmpty()) "" else "?$query"))
         val clips = json.getJSONArray("clips")
@@ -141,6 +143,7 @@ class Api(private val token: String?) {
             height = if (json.isNull("height")) null else json.optInt("height"),
             videoUrl = json.getString("video_url"),
             posterUrl = json.optStringOrNull("poster_url"),
+            viewCount = json.optInt("view_count"),
         )
     }
 

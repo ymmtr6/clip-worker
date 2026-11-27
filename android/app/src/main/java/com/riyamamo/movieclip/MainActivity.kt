@@ -19,6 +19,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -36,6 +41,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CropPortrait
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
@@ -55,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -74,8 +84,13 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import coil.ImageLoader
 import coil.compose.AsyncImage
+import coil.decode.VideoFrameDecoder
+import coil.request.ImageRequest
+import coil.request.videoFrameMillis
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val Accent = Color(0xFFFF3B5C)
 
@@ -136,6 +151,8 @@ private fun FeedScreen(model: FeedViewModel) {
     val context = LocalContext.current
     val pool = remember { PlayerPool(context.applicationContext) }
     val pagerState = rememberPagerState { model.clips.size }
+    val scope = rememberCoroutineScope()
+    var showGrid by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         pool.onViewed = model::recordView
@@ -159,7 +176,7 @@ private fun FeedScreen(model: FeedViewModel) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_STOP -> pool.pauseAll()
-                Lifecycle.Event.ON_START -> pool.resume()
+                Lifecycle.Event.ON_START -> if (!showGrid) pool.resume()
                 else -> Unit
             }
         }
@@ -187,12 +204,35 @@ private fun FeedScreen(model: FeedViewModel) {
             )
         }
 
+        if (showGrid) {
+            ClipGrid(
+                clips = model.clips,
+                onSelect = { index ->
+                    showGrid = false
+                    if (pagerState.currentPage == index) pool.resume()
+                    else scope.launch { pagerState.scrollToPage(index) }
+                },
+                onReachEnd = model::loadMore,
+            )
+        }
+
         TopBar(
             tag = model.tag,
             muted = pool.muted,
+            shuffled = model.shuffled,
+            showingGrid = showGrid,
             onClearTag = {
                 pool.releaseAll()
                 model.reload(null)
+            },
+            onToggleOrder = {
+                pool.releaseAll()
+                model.changeOrder(!model.shuffled)
+                scope.launch { pagerState.scrollToPage(0) }
+            },
+            onToggleGrid = {
+                if (showGrid) pool.resume() else pool.pauseAll()
+                showGrid = !showGrid
             },
             onToggleMute = pool::toggleMute,
         )
@@ -211,7 +251,16 @@ private fun FeedScreen(model: FeedViewModel) {
 }
 
 @Composable
-private fun TopBar(tag: String?, muted: Boolean, onClearTag: () -> Unit, onToggleMute: () -> Unit) {
+private fun TopBar(
+    tag: String?,
+    muted: Boolean,
+    shuffled: Boolean,
+    showingGrid: Boolean,
+    onClearTag: () -> Unit,
+    onToggleOrder: () -> Unit,
+    onToggleGrid: () -> Unit,
+    onToggleMute: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 14.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -232,6 +281,22 @@ private fun TopBar(tag: String?, muted: Boolean, onClearTag: () -> Unit, onToggl
             }
         }
         Spacer(Modifier.weight(1f))
+        RoundIconButton(onClick = onToggleOrder) {
+            Icon(
+                if (shuffled) Icons.Default.Shuffle else Icons.Default.Schedule,
+                contentDescription = if (shuffled) "シャッフル（タップで新着順）" else "新着順（タップでシャッフル）",
+                tint = Color.White,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        RoundIconButton(onClick = onToggleGrid) {
+            Icon(
+                if (showingGrid) Icons.Default.CropPortrait else Icons.Default.GridView,
+                contentDescription = if (showingGrid) "フィードに戻る" else "一覧",
+                tint = Color.White,
+            )
+        }
+        Spacer(Modifier.width(8.dp))
         RoundIconButton(onClick = onToggleMute) {
             Icon(
                 if (muted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
@@ -377,4 +442,50 @@ private fun sourceLabel(clip: Clip): String {
     }
     (clip.source?.title ?: clip.source?.url?.let { Uri.parse(it).host })?.let { parts += it }
     return parts.joinToString(" ")
+}
+
+/** 一覧。3列のサムネイルで、タップするとその動画からフィードを再生する */
+@Composable
+private fun ClipGrid(clips: List<Clip>, onSelect: (Int) -> Unit, onReachEnd: () -> Unit) {
+    val context = LocalContext.current
+    // ポスターの無い動画は先頭付近のフレームを使う
+    val imageLoader = remember {
+        ImageLoader.Builder(context).components { add(VideoFrameDecoder.Factory()) }.build()
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(3),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+        contentPadding = PaddingValues(top = 64.dp),
+        modifier = Modifier.fillMaxSize().background(Color.Black).statusBarsPadding(),
+    ) {
+        itemsIndexed(clips, key = { _, clip -> clip.id }) { index, clip ->
+            if (index >= clips.size - 6) LaunchedEffect(clips.size) { onReachEnd() }
+            Box(
+                Modifier
+                    .aspectRatio(9f / 16f)
+                    .background(Color(0xFF1A1A1A))
+                    .clickable { onSelect(index) },
+            ) {
+                AsyncImage(
+                    model = if (clip.posterUrl != null) clip.posterUrl
+                    else ImageRequest.Builder(context).data(clip.videoUrl).videoFrameMillis(500).build(),
+                    imageLoader = imageLoader,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                Column(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
+                        .padding(6.dp),
+                ) {
+                    Text(clip.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text("▶ ${clip.viewCount}", color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
+                }
+            }
+        }
+    }
 }

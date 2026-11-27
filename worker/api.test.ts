@@ -217,6 +217,26 @@ describe("視聴", () => {
     expect(tags.tags).toEqual([{ name: "偶数", count: 3 }]);
   });
 
+  it("シャッフルはページをまたいで重複も漏れもなく、タグでも絞れる", async () => {
+    const token = await issue();
+    for (let i = 0; i < 7; i += 1) await publish(token, `clip${i}`, i < 3 ? ["前半"] : []);
+
+    type Page = { clips: { title: string }[]; next_cursor: string | null };
+    const titles: string[] = [];
+    let cursor: string | null = "";
+    while (cursor !== null) {
+      const page: Page = await (await call(`/api/feed?order=shuffle&limit=3${cursor ? `&cursor=${cursor}` : ""}`)).json() as Page;
+      titles.push(...page.clips.map((clip) => clip.title));
+      cursor = page.next_cursor;
+    }
+    expect(titles).toHaveLength(7);
+    expect([...titles].sort()).toEqual(["clip0", "clip1", "clip2", "clip3", "clip4", "clip5", "clip6"]);
+
+    const tagged = await (await call(`/api/feed?order=shuffle&tag=${encodeURIComponent("前半")}`)).json() as Page;
+    expect(tagged.clips.map((clip) => clip.title).sort()).toEqual(["clip0", "clip1", "clip2"]);
+    expect((await call("/api/feed?order=shuffle&cursor=broken")).status).toBe(400);
+  });
+
   it("再生回数を数え、削除で動画ファイルも消える", async () => {
     const token = await issue();
     const id = await publish(token, "a");

@@ -54,6 +54,7 @@ struct FeedView: View {
     @State private var model: FeedModel
     @State private var pool = PlayerPool()
     @State private var activeID: String?
+    @State private var showingGrid = false
     @Environment(\.scenePhase) private var scenePhase
 
     init(auth: AuthStore) {
@@ -83,6 +84,13 @@ struct FeedView: View {
         .scrollIndicators(.hidden)
         .ignoresSafeArea()
         .background(Color.black)
+        .overlay {
+            if showingGrid {
+                ClipGridView(clips: model.clips, onSelect: select) {
+                    Task { await model.loadMore() }
+                }
+            }
+        }
         .overlay(alignment: .top) { topBar }
         .overlay { emptyState }
         .task {
@@ -98,7 +106,7 @@ struct FeedView: View {
         }
         .onChange(of: activeID) { _, _ in syncPlayers() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { pool.resume() } else { pool.pauseAll() }
+            if phase != .active { pool.pauseAll() } else if !showingGrid { pool.resume() }
         }
     }
 
@@ -118,6 +126,22 @@ struct FeedView: View {
                 }
             }
             Spacer()
+            Button {
+                Task { await changeOrder() }
+            } label: {
+                Image(systemName: model.shuffled ? "shuffle" : "clock")
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.35), in: Circle())
+            }
+            .accessibilityLabel(model.shuffled ? "シャッフル（タップで新着順）" : "新着順（タップでシャッフル）")
+            Button {
+                toggleGrid()
+            } label: {
+                Image(systemName: showingGrid ? "rectangle.portrait.fill" : "square.grid.3x3.fill")
+                    .frame(width: 44, height: 44)
+                    .background(.black.opacity(0.35), in: Circle())
+            }
+            .accessibilityLabel(showingGrid ? "フィードに戻る" : "一覧")
             Button {
                 pool.muted.toggle()
             } label: {
@@ -142,6 +166,32 @@ struct FeedView: View {
                 }
             }
         }
+    }
+
+    private func toggleGrid() {
+        if showingGrid {
+            showingGrid = false
+            pool.resume()
+        } else {
+            pool.pauseAll()
+            showingGrid = true
+        }
+    }
+
+    /// 一覧で選んだ動画からフィードを再生する
+    private func select(_ id: String) {
+        showingGrid = false
+        if activeID == id {
+            pool.resume()
+        } else {
+            activeID = id
+        }
+    }
+
+    private func changeOrder() async {
+        pool.reset()
+        activeID = nil
+        await model.setShuffled(!model.shuffled)
     }
 
     private func reload(tag: String?) async {

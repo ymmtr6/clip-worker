@@ -59,11 +59,12 @@ struct API {
         return decoder
     }()
 
-    func feed(cursor: String?, tag: String?) async throws -> FeedPage {
+    func feed(cursor: String?, tag: String?, shuffled: Bool) async throws -> FeedPage {
         var components = URLComponents(url: Server.origin.appending(path: "api/feed"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
             cursor.map { URLQueryItem(name: "cursor", value: $0) },
             tag.map { URLQueryItem(name: "tag", value: $0) },
+            shuffled ? URLQueryItem(name: "order", value: "shuffle") : nil,
         ].compactMap { $0 }
         return try await send(URLRequest(url: components.url!), as: FeedPage.self)
     }

@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 
 class FeedViewModel(application: Application) : AndroidViewModel(application) {
     private val tokens = TokenStore(application)
+    private val prefs = application.getSharedPreferences("feed", android.content.Context.MODE_PRIVATE)
 
     /** 視聴 API が認証を求めたとき（401 や Access へのリダイレクト）。公開モードのあいだはログインなしで見られる */
     var needsLogin by mutableStateOf(false)
@@ -26,10 +27,15 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
         private set
     var tag by mutableStateOf<String?>(null)
         private set
+    /** シャッフル順か新着順か。端末に保存する */
+    var shuffled by mutableStateOf(prefs.getBoolean("shuffled", false))
+        private set
     var errorMessage by mutableStateOf<String?>(null)
         private set
 
     private var cursor: String? = null
+    /** 並び順やタグを変えたら進める。読み込み中だった古い結果を捨てるため */
+    private var generation = 0
     private var done = false
     /** 取り直しが続けて失敗するときに、同じ動画で無限に取り直さないようにする */
     private val refreshedAt = mutableMapOf<String, Long>()
@@ -46,10 +52,18 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
         reload(null)
     }
 
+    fun changeOrder(value: Boolean) {
+        shuffled = value
+        prefs.edit().putBoolean("shuffled", value).apply()
+        reload(tag)
+    }
+
     fun reload(tag: String?) {
         this.tag = tag
         cursor = null
         done = false
+        generation++
+        loading = false
         clips.clear()
         loadedOnce = false
         loadMore()
@@ -63,9 +77,11 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
         val api = api
         if (loading || done) return
         loading = true
+        val started = generation
         viewModelScope.launch {
             try {
-                val page = api.feed(cursor, tag)
+                val page = api.feed(cursor, tag, shuffled)
+                if (started != generation) return@launch
                 val known = clips.map { it.id }.toSet()
                 clips.addAll(page.clips.filter { it.id !in known })
                 cursor = page.nextCursor
@@ -74,8 +90,10 @@ class FeedViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 handle(e)
             } finally {
-                loading = false
-                loadedOnce = true
+                if (started == generation) {
+                    loading = false
+                    loadedOnce = true
+                }
             }
         }
     }

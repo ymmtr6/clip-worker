@@ -278,7 +278,7 @@ function agentClip(row: ClipRow, tags: string[]) {
 
 type Cursor = { p: number; id: string };
 
-function encodeCursor(cursor: Cursor) {
+function encodeCursor(cursor: Cursor | ShuffleCursor) {
   return btoa(JSON.stringify(cursor)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
@@ -315,6 +315,65 @@ async function listReady(db: D1Database, options: { cursor?: string; tag?: strin
     rows: page,
     tags: await tagsFor(db, page.map((row) => row.id)),
     nextCursor: rows.length > options.limit && tail ? encodeCursor({ p: tail.published_at!, id: tail.id }) : null,
+  };
+}
+
+type ShuffleCursor = { seed: number; at: number; offset: number };
+
+/** 32bit の seed から決まった乱数列を作る（mulberry32） */
+function seededRandom(seed: number) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * シャッフル順。seed と開始時刻をカーソルに入れて、ページをまたいでも同じ並びを保つ
+ * （途中で公開されたものは次のシャッフルから混ざる）。
+ * 個人用の規模なので、対象の id を全部読んで Worker で並べ替える。
+ */
+async function listShuffled(db: D1Database, options: { cursor?: string; tag?: string; limit: number }) {
+  let cursor: ShuffleCursor = { seed: crypto.getRandomValues(new Uint32Array(1))[0], at: nowSeconds(), offset: 0 };
+  if (options.cursor) {
+    try {
+      cursor = JSON.parse(atob(options.cursor.replace(/-/g, "+").replace(/_/g, "/"))) as ShuffleCursor;
+    } catch {
+      throw new ApiError("invalid_cursor", 400);
+    }
+    if (![cursor.seed, cursor.at, cursor.offset].every(Number.isInteger)) throw new ApiError("invalid_cursor", 400);
+  }
+  const where = ["status = 'ready'", "published_at <= ?"];
+  const args: (string | number)[] = [cursor.at];
+  if (options.tag) {
+    where.push("EXISTS (SELECT 1 FROM clip_tags t WHERE t.clip_id = clips.id AND t.tag = ?)");
+    args.push(options.tag);
+  }
+  const { results } = await db.prepare(`SELECT id FROM clips WHERE ${where.join(" AND ")} ORDER BY id`).bind(...args).all<{ id: string }>();
+  const ids = (results ?? []).map((row) => row.id);
+  const random = seededRandom(cursor.seed);
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+  }
+  const pageIds = ids.slice(cursor.offset, cursor.offset + options.limit);
+  const rows = pageIds.length === 0 ? [] : (await db
+    .prepare(`SELECT * FROM clips WHERE id IN (${pageIds.map(() => "?").join(",")})`)
+    .bind(...pageIds)
+    .all<ClipRow>()).results ?? [];
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const page = pageIds.map((id) => byId.get(id)).filter((row): row is ClipRow => row !== undefined);
+  const next = cursor.offset + options.limit;
+  return {
+    rows: page,
+    tags: await tagsFor(db, page.map((row) => row.id)),
+    nextCursor: next < ids.length
+      ? encodeCursor({ ...cursor, offset: next })
+      : null,
   };
 }
 
@@ -667,8 +726,10 @@ export function createApp(makeStorage: (env: Env) => Storage) {
 
   viewer.get("/me", (c) => c.json({ actor: c.get("principal").actor }));
 
+  // order=shuffle でシャッフル、それ以外は新着順
   viewer.get("/feed", async (c) => {
-    const result = await listReady(c.env.DB, { cursor: c.req.query("cursor"), tag: c.req.query("tag"), limit: pageLimit(c.req.query("limit")) });
+    const options = { cursor: c.req.query("cursor"), tag: c.req.query("tag"), limit: pageLimit(c.req.query("limit")) };
+    const result = c.req.query("order") === "shuffle" ? await listShuffled(c.env.DB, options) : await listReady(c.env.DB, options);
     const storage = c.get("storage");
     const clips = await Promise.all(result.rows.map((row) => viewerClip(row, result.tags.get(row.id) ?? [], storage)));
     return c.json({ clips, next_cursor: result.nextCursor }, 200, { "Cache-Control": "no-store" });
