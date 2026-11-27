@@ -93,6 +93,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val Accent = Color(0xFFFF3B5C)
+/** 上部のボタン列の高さ。動画をこの下から置き、ボタンと重ねない */
+private val TopBarHeight = 56.dp
 
 class MainActivity : ComponentActivity() {
     private val model: FeedViewModel by viewModels()
@@ -262,7 +264,7 @@ private fun TopBar(
     onToggleMute: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 14.dp, vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().statusBarsPadding().height(TopBarHeight).padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Clip", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
@@ -339,30 +341,34 @@ private fun ClipPage(clip: Clip, pool: PlayerPool, isActive: Boolean, onTag: (St
                 if (isActive) pool.togglePause()
             },
     ) {
-        if (clip.posterUrl != null) {
-            AsyncImage(
-                model = clip.posterUrl,
-                contentDescription = null,
-                contentScale = if (clip.isLandscape) ContentScale.Fit else ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        if (player != null) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        useController = false
-                        setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        setKeepContentOnPlayerReset(true)
-                    }
-                },
-                update = { view ->
-                    view.player = player
-                    view.resizeMode = if (clip.isLandscape) AspectRatioFrameLayout.RESIZE_MODE_FIT else AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                },
-                onRelease = { view -> view.player = null },
-                modifier = Modifier.fillMaxSize(),
-            )
+        // 動画はステータスバー・上部ボタン・ナビゲーションバーを避けた範囲に置く
+        Box(Modifier.fillMaxSize().statusBarsPadding().padding(top = TopBarHeight).navigationBarsPadding()) {
+            if (clip.posterUrl != null) {
+                AsyncImage(
+                    model = clip.posterUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            if (player != null) {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            useController = false
+                            setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            setKeepContentOnPlayerReset(true)
+                        }
+                    },
+                    update = { view ->
+                        view.player = player
+                        // 左右が切れないよう、拡大せず全体を収める
+                        view.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    },
+                    onRelease = { view -> view.player = null },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
         if (isActive && pool.isPaused) {
             Icon(

@@ -62,27 +62,10 @@ struct FeedView: View {
     }
 
     var body: some View {
-        ScrollView(.vertical) {
-            LazyVStack(spacing: 0) {
-                ForEach(model.clips) { clip in
-                    ClipPage(
-                        clip: clip,
-                        player: pool.player(for: clip.id),
-                        isActive: pool.activeID == clip.id,
-                        pool: pool,
-                        onTag: { tag in Task { await reload(tag: tag) } },
-                        onDelete: model.canDelete ? { Task { await model.delete(id: clip.id) } } : nil
-                    )
-                    .containerRelativeFrame([.horizontal, .vertical])
-                    .id(clip.id)
-                }
-            }
-            .scrollTargetLayout()
+        // ページは画面いっぱいに並べ、動画と操作はダイナミックアイランドとホームバーを避けて置く
+        GeometryReader { proxy in
+            feed(insets: proxy.safeAreaInsets)
         }
-        .scrollTargetBehavior(.paging)
-        .scrollPosition(id: $activeID)
-        .scrollIndicators(.hidden)
-        .ignoresSafeArea()
         .background(Color.black)
         .overlay {
             if showingGrid {
@@ -108,6 +91,31 @@ struct FeedView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { pool.pauseAll() } else if !showingGrid { pool.resume() }
         }
+    }
+
+    private func feed(insets: EdgeInsets) -> some View {
+        ScrollView(.vertical) {
+            LazyVStack(spacing: 0) {
+                ForEach(model.clips) { clip in
+                    ClipPage(
+                        clip: clip,
+                        insets: insets,
+                        player: pool.player(for: clip.id),
+                        isActive: pool.activeID == clip.id,
+                        pool: pool,
+                        onTag: { tag in Task { await reload(tag: tag) } },
+                        onDelete: model.canDelete ? { Task { await model.delete(id: clip.id) } } : nil
+                    )
+                    .containerRelativeFrame([.horizontal, .vertical])
+                    .id(clip.id)
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollTargetBehavior(.paging)
+        .scrollPosition(id: $activeID)
+        .scrollIndicators(.hidden)
+        .ignoresSafeArea()
     }
 
     private var topBar: some View {
@@ -152,6 +160,7 @@ struct FeedView: View {
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 14)
+        .frame(height: ClipPage.topBarHeight)
     }
 
     @ViewBuilder
@@ -212,11 +221,16 @@ struct FeedView: View {
 
 struct ClipPage: View {
     let clip: Clip
+    /// ダイナミックアイランドとホームバーの分。動画と操作をこの内側に置く
+    let insets: EdgeInsets
     let player: AVPlayer?
     let isActive: Bool
     let pool: PlayerPool
     let onTag: (String) -> Void
     let onDelete: (() -> Void)?
+
+    /// 上部のボタン列の高さ。動画をこの下から置き、ボタンと重ねない
+    static let topBarHeight: CGFloat = 52
 
     @State private var confirmingDelete = false
     @Environment(\.openURL) private var openURL
@@ -226,13 +240,13 @@ struct ClipPage: View {
             Color.black
             if let poster = clip.posterUrl {
                 AsyncImage(url: poster) { image in
-                    image.resizable().aspectRatio(contentMode: clip.isLandscape ? .fit : .fill)
+                    image.resizable().aspectRatio(contentMode: .fit)
                 } placeholder: {
                     Color.black
                 }
             }
             if let player {
-                PlayerLayerView(player: player, fill: !clip.isLandscape)
+                PlayerLayerView(player: player)
             }
             if isActive && pool.isPaused {
                 Image(systemName: "play.fill")
@@ -241,6 +255,9 @@ struct ClipPage: View {
                     .shadow(radius: 8)
             }
         }
+        .padding(.top, insets.top + ClipPage.topBarHeight)
+        .padding(.bottom, insets.bottom)
+        .background(Color.black)
         .contentShape(Rectangle())
         .onTapGesture { if isActive { pool.togglePause() } }
         .overlay(alignment: .bottom) { meta }
@@ -312,7 +329,7 @@ struct ClipPage: View {
             .background(Color.white.opacity(0.15))
         }
         .foregroundStyle(.white)
-        .safeAreaPadding(.bottom)
+        .padding(.bottom, insets.bottom)
     }
 
     private var sourceLabel: String {
@@ -334,7 +351,6 @@ struct ClipPage: View {
 
 struct PlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
-    let fill: Bool
 
     final class LayerView: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
@@ -349,7 +365,8 @@ struct PlayerLayerView: UIViewRepresentable {
 
     func updateUIView(_ view: LayerView, context: Context) {
         if view.playerLayer.player !== player { view.playerLayer.player = player }
-        view.playerLayer.videoGravity = fill ? .resizeAspectFill : .resizeAspect
+        // 左右が切れないよう、拡大せず全体を収める
+        view.playerLayer.videoGravity = .resizeAspect
     }
 }
 

@@ -118,6 +118,8 @@ button { font: inherit; color: inherit; }
   display: grid;
   place-items: center;
   overflow: hidden;
+  /* 動画はノッチ・上部ボタン・ホームバーを避けた範囲に置く */
+  padding: calc(env(safe-area-inset-top) + 64px) 0 env(safe-area-inset-bottom);
 }
 
 /* PC では中央に縦長の枠で出す */
@@ -127,9 +129,6 @@ button { font: inherit; color: inherit; }
   max-width: calc(100vh * 9 / 16);
   object-fit: contain;
   background: #000;
-}
-@media (max-aspect-ratio: 10/16) {
-  .slide video { max-width: none; object-fit: cover; }
 }
 
 .paused {
