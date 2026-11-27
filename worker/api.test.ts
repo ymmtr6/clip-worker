@@ -161,6 +161,31 @@ describe("認証とスコープ", () => {
     expect((await call("/api/feed")).status).toBe(503);
   });
 
+  it("公開済みのクリップにあとからポスターを付けられ、単体取得で動画 URL が返る", async () => {
+    const token = await issue();
+    const { body } = await uploadClip(token);
+    const id = body.clip.id;
+    storage.putObject(`clips/${id}/video`, 10, "video/mp4");
+    await call(`/api/v1/clips/${id}/complete`, { method: "POST", token });
+
+    const detail = await (await call(`/api/v1/clips/${id}`, { token })).json() as { clip: { video_url: string; has_poster: boolean } };
+    expect(detail.clip.video_url).toContain(`clips/${id}/video`);
+    expect(detail.clip.has_poster).toBe(false);
+
+    const started = await call(`/api/v1/clips/${id}/poster`, { method: "POST", token, json: { content_type: "image/jpeg" } });
+    expect(started.status).toBe(200);
+    expect(((await started.json()) as { upload: { method: string } }).upload.method).toBe("PUT");
+    expect((await call(`/api/v1/clips/${id}/poster/complete`, { method: "POST", token })).status).toBe(409);
+
+    storage.putObject(`clips/${id}/poster`, 5, "image/jpeg");
+    const done = await call(`/api/v1/clips/${id}/poster/complete`, { method: "POST", token });
+    expect(((await done.json()) as { clip: { has_poster: boolean } }).clip.has_poster).toBe(true);
+    const feed = await (await call("/api/feed")).json() as { clips: { poster_url: string | null }[] };
+    expect(feed.clips[0].poster_url).toContain(`clips/${id}/poster`);
+
+    expect((await call(`/api/v1/clips/${id}/poster`, { method: "POST", token, json: { content_type: "image/gif" } })).status).toBe(400);
+  });
+
   it("PUBLIC_VIEWER なら閲覧だけ開き、削除とトークン管理は閉じたまま", async () => {
     const token = await issue();
     const { body } = await uploadClip(token);

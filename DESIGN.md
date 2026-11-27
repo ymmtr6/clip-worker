@@ -55,14 +55,23 @@ Worker が取得して Wasabi にストリームのまま流し込み、その�
 - Content-Type が `application/octet-stream` でも拡張子から判定する
 - https のみ
 
-### 2.3 冪等性
+### 2.3 ポスター
+
+一覧はポスター画像で並べるので、ポスターが無いと一覧を開くたびに動画ファイルを読みに行って重くなる。
+Worker では ffmpeg が動かないので、ポスターはボット側で作って付けてもらう（OpenAPI で強く推奨）。
+
+- 公開済みのクリップにもあとから付けられる: `POST /api/v1/clips/:id/poster`（url か content_type）→ PUT → `POST /api/v1/clips/:id/poster/complete`
+- 付いていないものは Mac で `scripts/backfill-posters.mjs` を流してまとめて付ける。`GET /api/v1/clips/:id` が返す動画の署名付き URL から
+  ffmpeg で1秒目付近の代表的な1コマを切り出し、幅480の JPEG にする。何度流しても付いたものは飛ばす
+
+### 2.4 冪等性
 
 `external_id`（ボット側の一意な ID。例: `yt:<videoId>:<開始秒>`）はトークン名ごとに一意。
 
 - 公開済みと同じ値で再送 → 200 `duplicate: true` で既存を返す（二重登録しない）
 - 未完了と同じ値で再送 → 同じ id のまま署名付き URL を出し直す（途中で落ちたボットがやり直せる）
 
-### 2.4 オブジェクトの置き場所
+### 2.5 オブジェクトの置き場所
 
 ```
 clips/<id>/video     Content-Type は PUT 時のもの

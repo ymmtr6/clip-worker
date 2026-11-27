@@ -32,7 +32,8 @@ export function openApiSpec(origin: string) {
         "",
         "- external_id に自分側の一意なID（元動画ID＋開始秒など）を入れること。同じ external_id の再送は二重登録されず、公開済みなら duplicate: true でそのまま返る。",
         "- 縦型（9:16）の mp4（H.264/AAC）を推奨。受け付ける形式は video/mp4, video/quicktime, video/webm、上限は500MB。",
-        "- poster（サムネイル）は任意。無ければアプリは動画の先頭フレームを表示する。",
+        "- poster（サムネイル）はできるだけ付けること。ビューアーの一覧はポスター画像で並ぶので、無いと動画ファイルを読みに行って重くなる。動画の見どころの1コマを縦 9:16、幅 480px 程度の JPEG にするのがよい。",
+        "- 公開済みのクリップにも POST /clips/{id}/poster であとからポスターを付けられる（url を渡すか、content_type で PUT 先をもらって POST /clips/{id}/poster/complete）。",
         "- source_url / source_title / source_start_seconds に切り抜き元を入れると、ビューアーに元動画へのリンクが出る。",
         "- tags は最大10個、1つ32文字まで。先頭の # は外される。",
         "- 必要なスコープはトークン発行時に決まる。GET /me で確認できる。",
@@ -91,6 +92,7 @@ export function openApiSpec(origin: string) {
             size_bytes: { type: ["integer", "null"] },
             duration_seconds: { type: ["number", "null"] },
             has_poster: { type: "boolean" },
+            video_url: { type: ["string", "null"], description: "GET /clips/{id} のときだけ。動画の署名付きURL（1時間有効）" },
             view_count: { type: "integer" },
             created_at: { type: "string", format: "date-time" },
             published_at: { type: ["string", "null"], format: "date-time" },
@@ -148,7 +150,12 @@ export function openApiSpec(origin: string) {
         },
       },
       "/clips/{id}": {
-        get: { operationId: "getClip", summary: "1件取得（read）", parameters: [clipId], responses: { 200: ok("クリップ", clipResponse), 404: error } },
+        get: {
+          operationId: "getClip",
+          summary: "1件取得（read）。公開済みなら video_url に動画の署名付きURLが入る",
+          parameters: [clipId],
+          responses: { 200: ok("クリップ", clipResponse), 404: error },
+        },
         patch: {
           operationId: "updateClip",
           summary: "タイトル・説明・タグ・切り抜き元を直す（clips:write）。tags は丸ごと置き換え",
@@ -174,6 +181,31 @@ export function openApiSpec(origin: string) {
           summary: "削除（clips:delete）。動画ファイルも消える",
           parameters: [clipId],
           responses: { 200: ok("削除した", { type: "object" }), 403: error },
+        },
+      },
+      "/clips/{id}/poster": {
+        post: {
+          operationId: "setPoster",
+          summary: "ポスターを付ける・差し替える（clips:write）",
+          description: "{\"url\": \"https://...\"} ならサーバーが取得してすぐ反映する。{\"content_type\": \"image/jpeg\"} なら upload に署名付きURLが入るので、そこへ PUT してから POST /clips/{id}/poster/complete を呼ぶ。",
+          parameters: [clipId],
+          requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/Part" } } } },
+          responses: {
+            200: ok("url のときは clip、content_type のときは upload", {
+              type: "object",
+              properties: { clip: { $ref: "#/components/schemas/Clip" }, upload: { $ref: "#/components/schemas/Upload" } },
+            }),
+            400: error, 404: error, 413: error, 422: error,
+          },
+        },
+      },
+      "/clips/{id}/poster/complete": {
+        post: {
+          operationId: "completePoster",
+          summary: "PUT したポスターを反映する（clips:write）",
+          description: "PUT されていなければ 409 poster_not_uploaded。上限は10MB。",
+          parameters: [clipId],
+          responses: { 200: ok("反映した", clipResponse), 404: error, 409: error, 413: error },
         },
       },
       "/clips/{id}/complete": {

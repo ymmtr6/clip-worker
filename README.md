@@ -77,6 +77,15 @@ curl -X POST https://clip.riyamamo.com/api/v1/clips \
 CLIP_TOKEN=mc_... node scripts/post-clip.mjs clip.mp4 "神回" poster.jpg
 ```
 
+## ポスターの後付け
+
+ポスターの無い公開済みクリップに、動画から切り出した1コマを付ける（ffmpeg が必要。何度流してもよい）。
+
+```bash
+CLIP_TOKEN=$(cat ~/.clip_grok_token) node scripts/backfill-posters.mjs --dry-run   # 対象の本数だけ見る
+CLIP_TOKEN=$(cat ~/.clip_grok_token) node scripts/backfill-posters.mjs
+```
+
 ## アプリ
 
 ### iOS

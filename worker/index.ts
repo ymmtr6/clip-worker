@@ -434,6 +434,11 @@ async function copyFromUrl(storage: Storage, url: string, key: string, field: st
   return contentType;
 }
 
+async function setPoster(db: D1Database, id: string, key: string): Promise<ClipRow> {
+  await db.prepare("UPDATE clips SET poster_key = ?2 WHERE id = ?1").bind(id, key).run();
+  return (await findClip(db, id))!;
+}
+
 /** 動画の実体を確かめて公開する。ポスターは無ければ外して公開する（無くても再生には困らない） */
 async function completeClip(db: D1Database, storage: Storage, row: ClipRow): Promise<ClipRow> {
   if (row.status === "ready") return row;
@@ -668,7 +673,41 @@ export function createApp(makeStorage: (env: Env) => Storage) {
   agent.get("/clips/:id", requireScope("read"), async (c) => {
     const row = await clipOr404(c);
     const tags = await tagsFor(c.env.DB, [row.id]);
-    return c.json({ clip: agentClip(row, tags.get(row.id) ?? []) });
+    // 単体取得では動画の署名付き URL も返す（ポスターを作るために動画を読む用途）
+    const videoUrl = row.status === "ready" ? await c.get("storage").presignGet(row.video_key, UPLOAD_TTL_SECONDS) : null;
+    return c.json({ clip: { ...agentClip(row, tags.get(row.id) ?? []), video_url: videoUrl } });
+  });
+
+  // 公開済みのクリップにポスターを付ける／差し替える。url なら取得して即反映、content_type なら PUT 先を返す
+  agent.post("/clips/:id/poster", requireScope("clips:write"), async (c) => {
+    const row = await clipOr404(c);
+    const input = part(await readJson(c), "poster", POSTER_TYPES, true)!;
+    const storage = c.get("storage");
+    const key = posterKey(row.id);
+    if ("url" in input) {
+      await copyFromUrl(storage, input.url, key, "poster", POSTER_TYPES, LIMITS.posterBytes);
+      const updated = await setPoster(c.env.DB, row.id, key);
+      const tags = await tagsFor(c.env.DB, [row.id]);
+      return c.json({ clip: agentClip(updated, tags.get(row.id) ?? []) });
+    }
+    return c.json({
+      upload: { method: "PUT", url: await storage.presignPut(key, input.content_type, UPLOAD_TTL_SECONDS), headers: { "Content-Type": input.content_type } },
+    });
+  });
+
+  agent.post("/clips/:id/poster/complete", requireScope("clips:write"), async (c) => {
+    const row = await clipOr404(c);
+    const storage = c.get("storage");
+    const key = posterKey(row.id);
+    const head = await storage.head(key);
+    if (!head || head.size === 0) throw new ApiError("poster_not_uploaded", 409);
+    if (head.size > LIMITS.posterBytes) {
+      await storage.delete(key);
+      throw new ApiError("too_large", 413, { field: "poster", max_bytes: LIMITS.posterBytes });
+    }
+    const updated = await setPoster(c.env.DB, row.id, key);
+    const tags = await tagsFor(c.env.DB, [row.id]);
+    return c.json({ clip: agentClip(updated, tags.get(row.id) ?? []) });
   });
 
   agent.post("/clips/:id/complete", requireScope("clips:write"), async (c) => {
