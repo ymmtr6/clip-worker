@@ -70,6 +70,8 @@ button { font: inherit; color: inherit; }
   padding: calc(env(safe-area-inset-top) + 64px) 0 env(safe-area-inset-bottom);
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  /* 行の高さをタイル（9:16）に合わせる。指定しないと一覧の高さに押し込まれて重なる */
+  grid-auto-rows: max-content;
   gap: 2px;
   align-content: start;
 }

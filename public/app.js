@@ -171,7 +171,19 @@ function showGrid(visible) {
   grid.hidden = !visible;
   gridToggle.textContent = visible ? "✕" : "▦";
   gridToggle.setAttribute("aria-label", visible ? "フィードに戻る" : "一覧");
-  if (visible) state.slides[state.active]?.video.pause();
+  if (visible) {
+    state.slides[state.active]?.video.pause();
+    fillGrid();
+  }
+}
+
+/**
+ * 一覧が画面を埋めるまで（＋少し先まで）次のページを読む。
+ * 幅の広い画面では1ページ分が1〜2行に収まってスクロールが起きず、scroll では続きを読めないため
+ */
+function fillGrid() {
+  if (grid.hidden || state.done) return;
+  if (grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 400) loadMore();
 }
 
 function renderOrder() {
@@ -242,6 +254,7 @@ async function loadMore() {
   if (state.loading || state.done) return;
   state.loading = true;
   const generation = state.generation;
+  let loaded = false;
   try {
     const query = new URLSearchParams();
     if (state.cursor) query.set("cursor", state.cursor);
@@ -261,11 +274,14 @@ async function loadMore() {
     state.cursor = page.next_cursor;
     state.done = !page.next_cursor;
     empty.hidden = state.slides.length > 0;
+    loaded = true;
   } catch (error) {
     console.error(error);
   } finally {
     if (generation === state.generation) state.loading = false;
   }
+  // 失敗したときは続けて読まない（エラーのたびに再要求し続けないため）
+  if (loaded && generation === state.generation) fillGrid();
 }
 
 function scrollBy(delta) {
@@ -283,9 +299,7 @@ orderButton.addEventListener("click", () => {
 });
 
 // 一覧の末尾近くまで来たら次のページを読む
-grid.addEventListener("scroll", () => {
-  if (grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 400) loadMore();
-});
+grid.addEventListener("scroll", fillGrid);
 
 muteButton.addEventListener("click", () => {
   state.muted = !state.muted;
